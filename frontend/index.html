@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Live v2 — Fullscreen Live</title>
+<style>
+:root{--yellow:#FFD600;--orange:#FFA000;--bg:#FFFDF3;--card:#fff}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial; background:var(--bg); color:#111}
+header{padding:14px;background:linear-gradient(90deg,var(--yellow),var(--orange));font-weight:800;text-align:center}
+.app{height:calc(100vh - 56px);display:flex;flex-direction:column}
+.main{flex:1;display:flex;align-items:stretch;justify-content:center;position:relative;padding:10px}
+.videoArea{flex:1;display:flex;align-items:center;justify-content:center;position:relative;max-width:1000px;margin:auto;border-radius:12px;overflow:hidden;background:#000}
+video{width:100%;height:100%;object-fit:cover}
+.localPreview{position:absolute;bottom:12px;right:12px;width:160px;height:100px;border-radius:8px;border:3px solid rgba(255,255,255,0.6);display:none}
+.controls{position:absolute;left:12px;bottom:12px;display:flex;gap:8px}
+.btn{background:var(--yellow);border:none;padding:10px 14px;border-radius:10px;font-weight:800;cursor:pointer}
+.btn.danger{background:#ff5252;color:#fff}
+.liveBadge{position:absolute;top:12px;left:12px;background:#d32f2f;color:#fff;padding:6px 10px;border-radius:20px;font-weight:800}
+.viewerCount{position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.9);padding:6px 10px;border-radius:12px;font-weight:700}
+.sidePanel{width:360px;padding:12px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(0,0,0,0.06)}
+.chatBtn{position:absolute;right:24px;bottom:24px;background:rgba(0,0,0,0.6);color:#fff;padding:12px 14px;border-radius:999px;border:none}
+.chatPanel{position:fixed;left:0;right:0;bottom:0;height:45%;background:#fff;border-top-left-radius:12px;border-top-right-radius:12px;box-shadow:0 -6px 20px rgba(0,0,0,0.12);transform:translateY(100%);transition:transform .28s ease}
+.chatPanel.open{transform:translateY(0)}
+.chatMessages{height:calc(100% - 60px);overflow:auto;padding:10px}
+.msg{padding:8px 12px;border-radius:18px;margin-bottom:8px;max-width:80%}
+.msg.me{background:#fff;border:1px solid rgba(0,0,0,0.06);margin-left:auto}
+.msg.other{background:linear-gradient(90deg,#fff7d0,#ffe9a8);border:1px solid rgba(255,214,0,0.12)}
+.inputRow{display:flex;gap:8px;padding:8px}
+.inputRow input{flex:1;padding:10px;border-radius:10px;border:1px solid #eee}
+.hidden{display:none}
+@media(max-width:900px){.sidePanel{display:none}.videoArea{border-radius:0}}
+</style>
+</head>
+<body>
+<header>🌞 Test Live v2</header>
+<div class="app">
+  <div class="main">
+    <div class="videoArea" id="videoArea">
+      <div id="liveBadge" class="liveBadge hidden">LIVE 🔴</div>
+      <div id="viewerCount" class="viewerCount hidden">0 viewers</div>
+      <video id="remote" autoplay playsinline></video>
+      <video id="local" class="localPreview" autoplay muted playsinline></video>
+      <div class="controls">
+        <button id="goLive" class="btn">Go Live</button>
+        <button id="stopLive" class="btn danger hidden">Stop</button>
+        <button id="joinPublic" class="btn">Join Public</button>
+      </div>
+      <button id="openChat" class="chatBtn">💬 Chat</button>
+    </div>
+    <div class="sidePanel card">
+      <div class="card">
+        <h3>Account</h3>
+        <input id="displayName" placeholder="display name" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee">
+        <input id="accessKey" placeholder="admin key (signup)" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee;margin-top:8px">
+        <input id="password" placeholder="password" type="password" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee;margin-top:8px">
+        <button id="signupBtn" class="btn" style="width:100%;margin-top:8px">Create account</button>
+        <hr />
+        <input id="loginId" placeholder="Your ID" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee">
+        <input id="loginPass" placeholder="password" type="password" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee;margin-top:8px">
+        <button id="loginBtn" class="btn" style="width:100%;margin-top:8px">Login</button>
+        <div id="me" style="margin-top:8px" class="small"></div>
+      </div>
+      <div class="card">
+        <h4>Private Broadcast</h4>
+        <input id="privateKey" placeholder="Enter private key" style="width:100%;padding:8px;border-radius:8px;border:1px solid #eee">
+        <button id="joinPrivate" class="btn" style="width:100%;margin-top:8px">Join Private</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="chatPanel" id="chatPanel">
+  <div class="chatMessages" id="chatMessages"></div>
+  <div class="inputRow">
+    <input id="chatInput" placeholder="Say something..." />
+    <button id="sendChat" class="btn">Send</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const API='';
+let socket, token=null, myId=null, pc=null, localStream=null, isLive=false;
+
+function addMsg(txt, me=false){ const el=document.createElement('div'); el.className='msg '+(me?'me':'other'); el.innerText=txt; document.getElementById('chatMessages').appendChild(el); document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight; }
+
+document.getElementById('openChat').onclick = ()=>{ document.getElementById('chatPanel').classList.toggle('open'); };
+
+document.getElementById('signupBtn').onclick = async ()=>{
+  const accessKey=document.getElementById('accessKey').value.trim();
+  const password=document.getElementById('password').value;
+  const displayName=document.getElementById('displayName').value.trim();
+  const r = await fetch('/api/signup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({accessKey,password,displayName})});
+  const j=await r.json();
+  if (j.token){ token=j.token; myId=j.id; localStorage.setItem('token',token); localStorage.setItem('id',myId); afterLogin(); alert('Save your ID: '+myId); } else alert(JSON.stringify(j));
+};
+
+document.getElementById('loginBtn').onclick = async ()=>{
+  const id=document.getElementById('loginId').value.trim(); const password=document.getElementById('loginPass').value;
+  const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,password})}); const j=await r.json();
+  if (j.token){ token=j.token; myId=j.id; localStorage.setItem('token',token); localStorage.setItem('id',myId); afterLogin(); } else alert(JSON.stringify(j));
+};
+
+async function afterLogin(){
+  document.getElementById('me').innerText = 'You: '+(document.getElementById('displayName').value || myId);
+  socket = io(API,{ path:'/socket.io' });
+  socket.on('connect', ()=> socket.emit('auth', token));
+  socket.on('auth-ok', d=>{ console.log('auth ok', d); });
+  socket.on('public-message', m=> addMsg(m.from+': '+m.text, m.from===myId));
+  socket.on('live-started', d=>{ document.getElementById('liveBadge').classList.remove('hidden'); document.getElementById('viewerCount').classList.remove('hidden'); addMsg('Live started by '+d.id); });
+  socket.on('live-stopped', ()=>{ document.getElementById('liveBadge').classList.add('hidden'); document.getElementById('viewerCount').classList.add('hidden'); addMsg('Live stopped'); });
+  socket.on('warning', ({id,count})=>{ if (id===myId) alert('Warning '+count+'/3'); });
+  socket.on('public-signal', async data=>{
+    if (!pc) return;
+    if (data.sdp){ await pc.setRemoteDescription(new RTCSessionDescription(data.sdp)); if (data.sdp.type==='offer'){ const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); socket.emit('public-signal',{ sdp: pc.localDescription }); } }
+    if (data.candidate){ try{ await pc.addIceCandidate(data.candidate); }catch(e){ console.warn(e); } }
+  });
+}
+
+document.getElementById('joinPublic').onclick = async ()=>{
+  // viewer mode - create pc and wait for remote track
+  pc = new RTCPeerConnection();
+  pc.ontrack = e=>{ document.getElementById('remote').srcObject = e.streams[0]; };
+  pc.onicecandidate = e=>{ if (e.candidate && socket) socket.emit('public-signal',{ candidate: e.candidate }); };
+  const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+  if (!socket) { const t = localStorage.getItem('token'); if (t){ token=t; myId=localStorage.getItem('id'); await afterLogin(); } else return alert('login first'); }
+  socket.emit('public-signal',{ sdp: pc.localDescription });
+  addMsg('Joined public as viewer');
+  document.getElementById('chatPanel').classList.add('open');
+};
+
+document.getElementById('goLive').onclick = async ()=>{
+  if (!token) return alert('login first');
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    document.getElementById('local').srcObject = localStream; document.getElementById('local').style.display='block';
+    isLive=true;
+    pc = new RTCPeerConnection();
+    localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+    pc.onicecandidate = e=>{ if (e.candidate) socket.emit('public-signal',{ candidate: e.candidate }); };
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    socket.emit('public-signal',{ sdp: pc.localDescription });
+    socket.emit('go-live',{ id: myId });
+    document.getElementById('goLive').style.display='none'; document.getElementById('stopLive').classList.remove('hidden'); document.getElementById('liveBadge').classList.remove('hidden');
+    // moderation snapshots
+    window._modInt = setInterval(async ()=>{
+      try{
+        const canvas=document.createElement('canvas'); canvas.width=160; canvas.height=120;
+        const ctx=canvas.getContext('2d'); ctx.drawImage(document.getElementById('local'),0,0,160,120);
+        const frame=canvas.toDataURL('image/jpeg').split(',')[1];
+        await fetch('/api/moderate-frame',{ method:'POST', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+token }, body: JSON.stringify({ frame }) });
+      }catch(e){ console.warn(e); }
+    },5000);
+  }catch(e){ alert('camera error '+e.message); }
+};
+
+document.getElementById('stopLive').onclick = ()=>{
+  if (window._modInt) clearInterval(window._modInt);
+  if (localStream) localStream.getTracks().forEach(t=>t.stop());
+  if (pc){ pc.close(); pc=null; }
+  isLive=false;
+  socket.emit('stop-live');
+  document.getElementById('goLive').style.display='inline-block'; document.getElementById('stopLive').classList.add('hidden'); document.getElementById('liveBadge').classList.add('hidden');
+};
+
+document.getElementById('sendChat').onclick = ()=>{
+  const t=document.getElementById('chatInput').value;
+  if (!socket) return alert('login first');
+  socket.emit('public-message', t);
+  addMsg('You: '+t, true);
+  document.getElementById('chatInput').value='';
+};
+
+// auto-login
+window.addEventListener('load', ()=>{ const t=localStorage.getItem('token'); const id=localStorage.getItem('id'); if (t&&id){ token=t; myId=id; afterLogin(); } });
+</script>
+</body>
+</html>
